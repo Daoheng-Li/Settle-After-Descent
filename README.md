@@ -20,7 +20,7 @@
 - 花费详情页可查看子花费、付款人、分摊规则与分摊结果，并继续编辑
 - 表格化导出预览，支持横向滑动
 - 导出 CSV 文件、导出铺展开的大图，并可分享到微信等应用
-- 接近 iOS 审美的浅色卡片风格，按钮采用“大中文 + 小英文”
+- 浅色卡片风格
 
 ## 目录结构
 
@@ -65,10 +65,8 @@ build/app/outputs/flutter-apk/app-release.apk
 adb install -r build/app/outputs/flutter-apk/app-release.apk
 ```
 
-## 下一步开发建议
+## Todo
 
-- 拆分 `lib/main.dart` 为 models、calculator、screens、widgets
-- 接入 SQLite / Drift 做更稳健的本地持久化
 - 增加暗色模式
 - 增加历史旅行复用成员组
-- iOS 端构建与适配（需完整 Xcode 与 CocoaPods）
+- iOS 端构建与适配

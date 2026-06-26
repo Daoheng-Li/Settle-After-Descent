@@ -1,4 +1,4 @@
-package com.lidaoheng.moneyapp.money_app
+package com.lidaoheng.settle_after_descent
 
 import android.content.ContentProvider
 import android.content.ContentValues

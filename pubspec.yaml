@@ -1,7 +1,7 @@
-name: money_app
+name: settle_after_descent
 description: A precise local travel expense splitting app.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

@@ -8,16 +8,16 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  runApp(const MoneyApp());
+  runApp(const SettleAfterDescent());
 }
 
-class MoneyApp extends StatelessWidget {
-  const MoneyApp({super.key});
+class SettleAfterDescent extends StatelessWidget {
+  const SettleAfterDescent({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MoneyApp',
+      title: '下山算账',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       home: const TripListScreen(),
@@ -330,25 +330,26 @@ class ExpenseCalculator {
     List<MemberLedger> ledgers,
     String hubId,
   ) {
-    final transfers = <SettlementTransfer>[];
+    final incoming = <SettlementTransfer>[];
+    final outgoing = <SettlementTransfer>[];
     for (final ledger in ledgers) {
       if (ledger.memberId == hubId) continue;
       if (ledger.net < -0.004) {
-        transfers.add(SettlementTransfer(
+        incoming.add(SettlementTransfer(
           fromMemberId: ledger.memberId,
           toMemberId: hubId,
           amount: _money(-ledger.net),
         ));
       }
       if (ledger.net > 0.004) {
-        transfers.add(SettlementTransfer(
+        outgoing.add(SettlementTransfer(
           fromMemberId: hubId,
           toMemberId: ledger.memberId,
           amount: _money(ledger.net),
         ));
       }
     }
-    return transfers;
+    return [...incoming, ...outgoing];
   }
 
   static Map<String, double> allocationForExpense(Expense expense) {
@@ -415,7 +416,29 @@ String yuan(double value) {
   return '$sign¥${value.abs().toStringAsFixed(2)}';
 }
 
-const _tripsStorageKey = 'money_app_trips_yala_v2';
+// 宽度上限按“英文字符”计：英文/数字算 1，汉字等全角字符算 2。
+// 默认上限 9，约等于 9 个英文字符或 4-5 个汉字。
+String clipName(String name, {int maxUnits = 9}) {
+  var units = 0;
+  final buffer = StringBuffer();
+  for (final ch in name.characters) {
+    final width = _charWidth(ch);
+    if (units + width > maxUnits) {
+      return '$buffer...';
+    }
+    units += width;
+    buffer.write(ch);
+  }
+  return name;
+}
+
+int _charWidth(String ch) {
+  if (ch.isEmpty) return 1;
+  final code = ch.runes.first;
+  return code >= 0x1100 ? 2 : 1;
+}
+
+const _tripsStorageKey = 'settle_after_descent_trips_v1';
 
 class AppState extends ChangeNotifier {
   AppState() : trips = [_sampleTrip()] {
@@ -538,6 +561,21 @@ class AppState extends ChangeNotifier {
     trip.backgroundAsset = asset;
     trip.backgroundImagePath = imagePath;
     trip.backgroundColorValue = colorValue;
+    _save();
+    notifyListeners();
+  }
+
+  void deleteTrip(String tripId) {
+    trips.removeWhere((trip) => trip.id == tripId);
+    _save();
+    notifyListeners();
+  }
+
+  void deleteExpense({
+    required String tripId,
+    required String expenseId,
+  }) {
+    tripById(tripId).expenses.removeWhere((item) => item.id == expenseId);
     _save();
     notifyListeners();
   }
@@ -935,15 +973,24 @@ class _TripListScreenState extends State<TripListScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'MoneyApp',
+                          '下山算账',
                           style: Theme.of(context)
                               .textTheme
                               .displaySmall
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Settle After Descent',
+                          style:
+                              Theme.of(context).textTheme.labelMedium?.copyWith(
+                                    color: Colors.black45,
+                                    letterSpacing: 0.6,
+                                  ),
+                        ),
                         const SizedBox(height: 6),
                         Text(
-                          '精细、公平、可追溯的朋友出行分账',
+                          '精细、公平、可追溯的山野分账',
                           style:
                               Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: Colors.black54,
@@ -977,6 +1024,8 @@ class _TripListScreenState extends State<TripListScreen> {
                             ),
                           ),
                         ),
+                        onLongPressAt: (pos) =>
+                            _showTripCardMenu(context, trip, pos),
                       );
                     },
                   ),
@@ -987,6 +1036,91 @@ class _TripListScreenState extends State<TripListScreen> {
         );
       },
     );
+  }
+
+  Future<void> _showTripCardMenu(
+    BuildContext context,
+    Trip trip,
+    Offset position,
+  ) async {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      items: const [
+        PopupMenuItem<String>(
+          value: 'delete',
+          height: 36,
+          child: Text(
+            '删除旅行',
+            style: TextStyle(
+              color: Color(0xFFC62828),
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ],
+    );
+    if (selected == 'delete' && context.mounted) {
+      await _confirmDeleteTrip(context, trip);
+    }
+  }
+
+  Future<void> _confirmDeleteTrip(BuildContext context, Trip trip) async {
+    final first = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除旅行'),
+        content: Text('确定要删除「${trip.name}」吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('继续'),
+          ),
+        ],
+      ),
+    );
+    if (first != true || !context.mounted) return;
+
+    final second = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('再次确认删除'),
+        content: Text(
+          '删除「${trip.name}」后，这次旅行的全部成员、花费、子花费和结算数据都会被永久删除，且无法恢复。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('我再想想'),
+          ),
+          TextButton(
+            style:
+                TextButton.styleFrom(foregroundColor: const Color(0xFF9A4B35)),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+    if (second != true) return;
+
+    state.deleteTrip(trip.id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已删除「${trip.name}」')),
+      );
+    }
   }
 
   void _showAddTrip(BuildContext context) {
@@ -1051,8 +1185,9 @@ class _TripListScreenState extends State<TripListScreen> {
                 const SizedBox(height: 12),
                 OutlinedButton(
                   onPressed: () async {
-                    final path = await const MethodChannel('money_app/native')
-                        .invokeMethod<String>(
+                    final path =
+                        await const MethodChannel('settle_after_descent/native')
+                            .invokeMethod<String>(
                       'pickImage',
                     );
                     if (path != null && path.isNotEmpty) {
@@ -1091,71 +1226,79 @@ class TripCard extends StatelessWidget {
     required this.trip,
     required this.ledgers,
     required this.onTap,
+    this.onLongPressAt,
     super.key,
   });
 
   final Trip trip;
   final List<MemberLedger> ledgers;
   final VoidCallback onTap;
+  final ValueChanged<Offset>? onLongPressAt;
 
   @override
   Widget build(BuildContext context) {
     final total = trip.expenses.fold(0.0, (sum, e) => sum + e.amount);
     return Card(
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(28),
-        onTap: onTap,
-        child: Stack(
-          children: [
-            Positioned.fill(child: TripBackground(trip: trip)),
-            Padding(
-              padding: const EdgeInsets.all(22),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              trip.name,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge
-                                  ?.copyWith(
+      child: GestureDetector(
+        onLongPressStart: onLongPressAt == null
+            ? null
+            : (details) => onLongPressAt!(details.globalPosition),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: onTap,
+          child: Stack(
+            children: [
+              Positioned.fill(child: TripBackground(trip: trip)),
+              Padding(
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                trip.name,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                '${trip.members.length} 位成员 · ${trip.expenses.length} 笔花费',
+                                style: const TextStyle(color: Colors.black54),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          yuan(total),
+                          style:
+                              Theme.of(context).textTheme.titleLarge?.copyWith(
                                     fontWeight: FontWeight.w700,
                                   ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '${trip.members.length} 位成员 · ${trip.expenses.length} 笔花费',
-                              style: const TextStyle(color: Colors.black54),
-                            ),
-                          ],
                         ),
-                      ),
-                      Text(
-                        yuan(total),
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  Wrap(
-                    spacing: -6,
-                    children: trip.members
-                        .map((m) => MemberAvatar(member: m, size: 42))
-                        .toList(),
-                  ),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Wrap(
+                      spacing: -6,
+                      children: trip.members
+                          .map((m) => MemberAvatar(member: m, size: 42))
+                          .toList(),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1281,14 +1424,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         setState(() => settlementMode = value),
                   ),
                   const SizedBox(height: 12),
-                  if (settlementMode == 0)
-                    TransferCard(
-                      title: '最短转账路径',
-                      subtitle: 'Minimal Transfers',
-                      trip: trip,
-                      transfers: shortest,
-                    )
-                  else ...[
+                  if (settlementMode == 0) ...[
                     _HubSelector(
                       trip: trip,
                       hubId: hubMemberId!,
@@ -1301,7 +1437,13 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                       trip: trip,
                       transfers: hub,
                     ),
-                  ],
+                  ] else
+                    TransferCard(
+                      title: '最短转账路径',
+                      subtitle: 'Minimal Transfers',
+                      trip: trip,
+                      transfers: shortest,
+                    ),
                 ],
                 const SizedBox(height: 18),
                 const SectionTitle('花费明细', 'Expenses'),
@@ -1448,11 +1590,29 @@ class _OverviewCard extends StatelessWidget {
                           Text(member.name,
                               style:
                                   const TextStyle(fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Text('已付',
+                                  style: TextStyle(
+                                      color: Colors.black54, fontSize: 12)),
+                              const SizedBox(width: 6),
+                              Text(yuan(ledger.paid),
+                                  style: const TextStyle(
+                                      color: Colors.black54, fontSize: 12)),
+                            ],
+                          ),
                           const SizedBox(height: 2),
-                          Text(
-                            '已付 ${yuan(ledger.paid)} · 应担 ${yuan(ledger.owed)}',
-                            style: const TextStyle(
-                                color: Colors.black54, fontSize: 12),
+                          Row(
+                            children: [
+                              const Text('应担',
+                                  style: TextStyle(
+                                      color: Colors.black54, fontSize: 12)),
+                              const SizedBox(width: 6),
+                              Text(yuan(ledger.owed),
+                                  style: const TextStyle(
+                                      color: Colors.black54, fontSize: 12)),
+                            ],
                           ),
                         ],
                       ),
@@ -1769,8 +1929,18 @@ class _ExpenseEditorScreenState extends State<ExpenseEditorScreen> {
                   title: Text(sub.name,
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                   subtitle: Text(sub.rule.kind.zh),
-                  trailing: Text(yuan(sub.amount),
-                      style: const TextStyle(fontWeight: FontWeight.w800)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(yuan(sub.amount),
+                          style: const TextStyle(fontWeight: FontWeight.w800)),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded,
+                            color: Color(0xFF9A4B35)),
+                        onPressed: () => _confirmDeleteSubExpense(index),
+                      ),
+                    ],
+                  ),
                   onTap: () => _editSubExpense(index),
                 );
               }),
@@ -1802,6 +1972,31 @@ class _ExpenseEditorScreenState extends State<ExpenseEditorScreen> {
         memberTierIds[member.id] = tierDrafts.first.id;
       }
     }
+  }
+
+  Future<void> _confirmDeleteSubExpense(int index) async {
+    final sub = subExpenses[index];
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除子花费'),
+        content: Text('确定要删除子花费「${sub.name}」吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            style:
+                TextButton.styleFrom(foregroundColor: const Color(0xFF9A4B35)),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => subExpenses.removeAt(index));
   }
 
   void _editSubExpense(int? index) {
@@ -2615,8 +2810,8 @@ class SettlementModeTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final labels = [
-      ('最短路径', 'Minimal'),
       ('中转人', 'Hub'),
+      ('最短路径', 'Minimal'),
     ];
     return Card(
       child: Padding(
@@ -2703,15 +2898,43 @@ class TransferCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Row(
                       children: [
+                        const SizedBox(width: 2),
                         Expanded(
                           child: Text(
-                            '${trip.member(t.fromMemberId).name}  →  ${trip.member(t.toMemberId).name}',
+                            clipName(trip.member(t.fromMemberId).name),
+                            textAlign: TextAlign.right,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
                         ),
-                        Text(yuan(t.amount),
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w800)),
+                        const SizedBox(
+                          width: 34,
+                          child: Text(
+                            '→',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            clipName(trip.member(t.toMemberId).name),
+                            textAlign: TextAlign.left,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 84,
+                          child: Text(
+                            yuan(t.amount),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
                       ],
                     ),
                   )),
@@ -2837,6 +3060,30 @@ class ExpenseDetailScreen extends StatelessWidget {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF9A4B35),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                        onPressed: () =>
+                            _confirmDeleteExpense(context, trip, expense),
+                        child: const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('删除花费',
+                                style: TextStyle(
+                                    fontSize: 15, fontWeight: FontWeight.w800)),
+                            SizedBox(height: 2),
+                            Text('Delete', style: TextStyle(fontSize: 9)),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 18),
@@ -2927,6 +3174,35 @@ class ExpenseDetailScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _confirmDeleteExpense(
+    BuildContext context,
+    Trip trip,
+    Expense expense,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除花费'),
+        content: Text('确定要删除「${expense.name}」吗？该花费及其子花费、付款记录都会被删除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            style:
+                TextButton.styleFrom(foregroundColor: const Color(0xFF9A4B35)),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    state.deleteExpense(tripId: trip.id, expenseId: expense.id);
+    if (context.mounted) Navigator.of(context).pop();
   }
 }
 
@@ -3129,7 +3405,7 @@ class ExportPreview extends StatelessWidget {
     final bytes = await _tableImageBytes();
     await file.writeAsBytes(bytes, flush: true);
     if (!context.mounted) return;
-    await const MethodChannel('money_app/native').invokeMethod<void>(
+    await const MethodChannel('settle_after_descent/native').invokeMethod<void>(
       'shareFile',
       {
         'path': file.path,
@@ -3214,7 +3490,7 @@ class ExportPreview extends StatelessWidget {
     final file = File('${directory.path}/${safeName}_expenses.csv');
     await file.writeAsString(_csvText(), flush: true);
     if (!context.mounted) return;
-    await const MethodChannel('money_app/native').invokeMethod<void>(
+    await const MethodChannel('settle_after_descent/native').invokeMethod<void>(
       'shareFile',
       {
         'path': file.path,

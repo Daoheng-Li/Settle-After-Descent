@@ -1,4 +1,4 @@
-package com.lidaoheng.moneyapp.money_app
+package com.lidaoheng.settle_after_descent
 
 import android.content.Intent
 import android.net.Uri
@@ -13,7 +13,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "money_app/native")
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "settle_after_descent/native")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "pickImage" -> pickImage(result)

@@ -1,12 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:money_app/main.dart';
+import 'package:settle_after_descent/main.dart';
 
 void main() {
-  testWidgets('MoneyApp renders the trip list', (tester) async {
-    await tester.pumpWidget(const MoneyApp());
+  testWidgets('SettleAfterDescent renders the trip list', (tester) async {
+    await tester.pumpWidget(const SettleAfterDescent());
 
-    expect(find.text('MoneyApp'), findsOneWidget);
+    expect(find.text('下山算账'), findsOneWidget);
     expect(find.text('2026端午节雅拉正穿'), findsOneWidget);
   });
 }
